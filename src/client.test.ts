@@ -1,6 +1,7 @@
 import type { AxiosInstance } from 'axios';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  CACHE_MAX_BYTES,
   CACHE_TTL_MS,
   MAX_ARCHIVE_RESPONSE_BYTES,
   MAX_REQUEST_BODY_BYTES,
@@ -305,6 +306,50 @@ describe('OpenMeteoClient response cache', () => {
     await client.getForecast({ latitude: 1, longitude: 1 });
 
     expect(get).toHaveBeenCalledTimes(3);
+  });
+
+  it.each(['1.5', '', '  ', 'abc'])(
+    'falls back to the default size for OPEN_METEO_CACHE_MAX_BYTES=%j',
+    (value) => {
+      vi.stubEnv('OPEN_METEO_CACHE_MAX_BYTES', value);
+      const client = new OpenMeteoClient();
+      const cache = (client as unknown as { cache?: { maxSize: number } }).cache;
+
+      expect(cache?.maxSize).toBe(CACHE_MAX_BYTES);
+    },
+  );
+
+  it('uses a short TTL for archive ranges ending in the last few days', async () => {
+    const client = new OpenMeteoClient();
+    getSpy(client, 'archiveClient').mockResolvedValue({ data: { daily: {} } } as never);
+    const set = vi.spyOn((client as unknown as { cache: { set: unknown } }).cache, 'set' as never);
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+    await client.getArchive({
+      latitude: 48.85,
+      longitude: 2.35,
+      start_date: '2020-01-01',
+      end_date: '2020-01-31',
+    });
+    await client.getArchive({
+      latitude: 48.85,
+      longitude: 2.35,
+      start_date: '2020-01-01',
+      end_date: yesterday,
+    });
+
+    expect(set).toHaveBeenNthCalledWith(
+      1,
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ ttl: CACHE_TTL_MS.archive }),
+    );
+    expect(set).toHaveBeenNthCalledWith(
+      2,
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ ttl: CACHE_TTL_MS.archiveRecent }),
+    );
   });
 
   it('is disabled when OPEN_METEO_CACHE_MAX_BYTES is 0', async () => {

@@ -146,7 +146,7 @@ The server uses environment variables for API endpoints with fallback defaults:
 - `OPEN_METEO_CLIMATE_API_URL` - Climate projection service
 
 Caching:
-- `OPEN_METEO_CACHE_MAX_BYTES` - Size cap for the in-memory LRU response cache, counted in bytes of serialized JSON (default: 20000000). `0` disables it.
+- `OPEN_METEO_CACHE_MAX_BYTES` - Size cap for the in-memory LRU response cache, counted in bytes of serialized JSON (default: 20000000). `0` disables it; a blank or non-integer value falls back to the default.
 
 Transport configuration:
 - `TRANSPORT` - Set to `http` to enable Streamable HTTP mode (default: stdio)

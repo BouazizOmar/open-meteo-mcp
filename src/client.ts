@@ -39,10 +39,15 @@ export const CACHE_TTL_MS = {
   flood: 60 * 60 * 1000,
   seasonal: 6 * 60 * 60 * 1000,
   archive: 24 * 60 * 60 * 1000,
+  archiveRecent: 60 * 60 * 1000,
   climate: 24 * 60 * 60 * 1000,
   geocoding: 7 * 24 * 60 * 60 * 1000,
   elevation: 30 * 24 * 60 * 60 * 1000,
 } as const;
+
+// The archive backfills its latest days late (null or preliminary values at first),
+// so a range ending this close to today gets the short archiveRecent TTL instead.
+export const ARCHIVE_RECENT_DAYS = 5;
 
 export class OpenMeteoClient {
   private client: AxiosInstance;
@@ -104,8 +109,12 @@ export class OpenMeteoClient {
       maxContentLength: MAX_ARCHIVE_RESPONSE_BYTES,
     });
 
-    const configured = Number(process.env.OPEN_METEO_CACHE_MAX_BYTES ?? CACHE_MAX_BYTES);
-    const maxSize = Number.isFinite(configured) && configured >= 0 ? configured : CACHE_MAX_BYTES;
+    // Blank counts as unset (only an explicit 0 disables the cache), and lru-cache
+    // throws on a non-integer maxSize, so anything else falls back to the default.
+    const raw = process.env.OPEN_METEO_CACHE_MAX_BYTES?.trim();
+    const configured = raw ? Number(raw) : CACHE_MAX_BYTES;
+    const maxSize =
+      Number.isSafeInteger(configured) && configured >= 0 ? configured : CACHE_MAX_BYTES;
     this.cache = maxSize > 0 ? new LRUCache<string, object>({ maxSize }) : undefined;
 
     this.setupErrorInterceptors();
@@ -168,6 +177,11 @@ export class OpenMeteoClient {
   }
 
   // The cached value is handed out by reference; callers must not mutate it.
+  private static archiveTtl(endDate: string): number {
+    const cutoff = Date.now() - ARCHIVE_RECENT_DAYS * 24 * 60 * 60 * 1000;
+    return Date.parse(endDate) >= cutoff ? CACHE_TTL_MS.archiveRecent : CACHE_TTL_MS.archive;
+  }
+
   private async cachedGet<T extends object>(
     instance: AxiosInstance,
     path: string,
@@ -208,7 +222,7 @@ export class OpenMeteoClient {
       this.archiveClient,
       '/v1/archive',
       params,
-      CACHE_TTL_MS.archive,
+      OpenMeteoClient.archiveTtl(params.end_date),
       signal,
     );
   }
